@@ -1,58 +1,69 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import pyttsx3
-import threading
+from collections import deque
 
 app = Flask(__name__)
 CORS(app)
 
+# Initialize TTS engine
 engine = pyttsx3.init()
-is_playing = False
-pause_event = threading.Event()
-stop_event = threading.Event()
+is_running = False  # Global state to manage engine status
+request_queue = deque()  # Queue to manage incoming requests
 
-def speak_text(text):
-    global is_playing
-    is_playing = True
-    engine.say(text)
-    engine.runAndWait()
-    is_playing = False
+# Log available voices and their attributes
+voices = engine.getProperty('voices')
+for voice in voices:
+    print(f"Voice: {voice.name}, ID: {voice.id}, Lang: {voice.languages}, Rate: {engine.getProperty('rate')}")
+
+def process_queue():
+    global is_running
+    while request_queue:
+        text, rate = request_queue.popleft()  # Get the next request
+        is_running = True  # Set the flag before speaking
+
+        # Set and log the rate
+        engine.setProperty('rate', rate)
+        print(f'Setting speech rate to: {rate} wpm')
+        print(f'Current rate before speaking: {engine.getProperty("rate")}')
+
+        # Log the current settings
+        print(f'Speaking text: "{text}" at rate: {rate}')
+
+        engine.say(text)
+        engine.runAndWait()  # This blocks until speaking is done
+        print("Speaking completed.")
+        
+        is_running = False  # Reset state after speaking is done
 
 @app.route('/speak', methods=['POST'])
 def speak():
-    global is_playing, stop_event
-    text = request.json.get('text')
-    if not is_playing:
-        stop_event.clear()
-        threading.Thread(target=speak_text, args=(text,)).start()
-        return jsonify({"status": "speaking"}), 200
-    return jsonify({"status": "already speaking"}), 409
+    global is_running
+    data = request.json
+    text = data.get('text')
+    rate = data.get('rate', 250)
 
-@app.route('/pause', methods=['POST'])
-def pause():
-    global is_playing
-    if is_playing:
-        pause_event.set()
-        return jsonify({"status": "paused"}), 200
-    return jsonify({"status": "not speaking"}), 409
+    # Check for empty text
+    if not text:
+        return jsonify({"error": "No text provided"}), 400  # Bad request error
 
-@app.route('/resume', methods=['POST'])
-def resume():
-    global is_playing
-    if is_playing and pause_event.is_set():
-        pause_event.clear()
-        return jsonify({"status": "resumed"}), 200
-    return jsonify({"status": "not paused or already resumed"}), 409
+    # Add request to the queue
+    request_queue.append((text, rate))
+
+    # Process the queue if not already running
+    if not is_running:
+        process_queue()
+
+    return jsonify({"message": "Speaking started"}), 200
 
 @app.route('/stop', methods=['POST'])
 def stop():
-    global is_playing, stop_event
-    if is_playing:
-        stop_event.set()
+    global is_running
+    if is_running:
         engine.stop()
-        is_playing = False
+        is_running = False
         return jsonify({"status": "stopped"}), 200
     return jsonify({"status": "not speaking"}), 409
 
 if __name__ == '__main__':
-    app.run(port=5000)
+    app.run(debug=True, port=5000)

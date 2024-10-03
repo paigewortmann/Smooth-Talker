@@ -22,7 +22,7 @@ const StyledTextareaAutosize = styled(TextareaAutosize)(({ theme }) => ({
 
 const TtsComponent: React.FC = () => {
     const [text, setText] = useState('');
-    const [rate, setRate] = useState(1);
+    const [rate, setRate] = useState(1.5); // Default to a reasonable mid-value for wpm
     const [isPlaying, setIsPlaying] = useState(false);
 
     const handleTextChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -33,28 +33,22 @@ const TtsComponent: React.FC = () => {
         setRate(newValue as number);
     };
 
-    const handlePlayPause = () => {
-        if (isPlaying) {
-            api.post('/stop')
-                .then(() => setIsPlaying(false))
-                .catch(error => console.error('Error stopping:', error));
-        } else {
-            api.post('/speak', { text, rate })
-                .then(() => setIsPlaying(true))
-                .catch(error => console.error('Error speaking:', error));
-        }
-    };
-
-    const handlePause = () => {
-        api.post('/pause')
-            .then(() => setIsPlaying(false))
-            .catch(error => console.error('Error pausing:', error));
-    };
-
-    const handleResume = () => {
-        api.post('/resume')
-            .then(() => setIsPlaying(true))
-            .catch(error => console.error('Error resuming:', error));
+    const handlePlay = () => {
+        const wpmRate = Math.round(rate * 100); // Convert to wpm range (100-200)
+        
+        api.post('/speak', { text, rate: wpmRate })
+            .then(() => {
+                setIsPlaying(true);
+                // Estimate the duration based on text length and rate
+                const estimatedDuration = (text.length / (wpmRate / 10)) * 1000; // Adjust the formula as needed
+                setTimeout(() => {
+                    setIsPlaying(false);
+                }, estimatedDuration);
+            })
+            .catch(error => {
+                console.error('Error speaking:', error);
+                setIsPlaying(false); // Ensure state resets on error
+            });
     };
 
     return (
@@ -81,24 +75,11 @@ const TtsComponent: React.FC = () => {
             />
             <Button
                 variant="contained"
-                color={isPlaying ? 'secondary' : 'primary'}
-                onClick={handlePlayPause}
-            >
-                {isPlaying ? 'Pause' : 'Play'}
-            </Button>
-            <Button
-                variant="contained"
                 color="primary"
-                onClick={handlePause}
+                onClick={handlePlay}
+                disabled={isPlaying}
             >
-                Pause
-            </Button>
-            <Button
-                variant="contained"
-                color="primary"
-                onClick={handleResume}
-            >
-                Resume
+                Play
             </Button>
         </Container>
     );
